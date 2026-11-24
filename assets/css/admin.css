@@ -1,0 +1,308 @@
+.plp-wrap h1 {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.plp-tag {
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .04em;
+	background: #e7f5ec;
+	color: #1e7b3c;
+	border: 1px solid #bfe3cb;
+	border-radius: 999px;
+	padding: 2px 8px;
+}
+
+.plp-lead {
+	max-width: 900px;
+	color: #50575e;
+}
+
+.plp-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+	gap: 16px;
+	margin-top: 16px;
+	align-items: start;
+}
+
+@media (max-width: 1100px) {
+	.plp-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+.plp-card {
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 8px;
+	padding: 16px 18px;
+	box-shadow: 0 1px 1px rgba(0, 0, 0, .03);
+	margin-bottom: 16px;
+}
+
+.plp-card h2 {
+	margin-top: 0;
+	font-size: 16px;
+}
+
+.plp-card h3 {
+	font-size: 14px;
+	margin-bottom: 6px;
+}
+
+.plp-fieldset {
+	border: 1px solid #dcdcde;
+	border-radius: 6px;
+	padding: 10px 12px;
+	margin: 0 0 14px;
+}
+
+.plp-fieldset legend {
+	font-weight: 600;
+	padding: 0 4px;
+}
+
+.plp-check-all {
+	display: block;
+	margin-bottom: 8px;
+	font-weight: 600;
+}
+
+.plp-plugin-list {
+	max-height: 280px;
+	overflow: auto;
+	border-top: 1px solid #f0f0f1;
+	padding-top: 4px;
+}
+
+.plp-plugin {
+	display: block;
+	padding: 4px 2px;
+	border-bottom: 1px dashed #f0f0f1;
+}
+
+.plp-plugin:last-child {
+	border-bottom: 0;
+}
+
+.plp-plugin-name {
+	font-weight: 500;
+}
+
+.plp-plugin-ver {
+	color: #787c82;
+	font-size: 12px;
+}
+
+.plp-muted {
+	color: #787c82;
+	font-size: 12px;
+}
+
+.plp-row label {
+	font-weight: 600;
+	margin-right: 6px;
+}
+
+.plp-error {
+	color: #b32d2e;
+	font-weight: 600;
+}
+
+.plp-ok {
+	color: #1e7b3c;
+	font-weight: 600;
+}
+
+.plp-bad {
+	color: #b32d2e;
+	font-weight: 600;
+}
+
+.plp-progress-line {
+	margin: 6px 0;
+}
+
+.plp-bar {
+	height: 12px;
+	background: #f0f0f1;
+	border-radius: 999px;
+	overflow: hidden;
+	margin-bottom: 12px;
+}
+
+.plp-bar span {
+	display: block;
+	height: 100%;
+	background: #2271b1;
+	transition: width .2s ease;
+}
+
+.plp-log {
+	max-height: 180px;
+	overflow: auto;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 6px;
+	font-family: Menlo, Consolas, monospace;
+	font-size: 11px;
+	padding: 8px 10px;
+	margin: 0 0 10px;
+}
+
+.plp-log li {
+	margin: 0;
+	padding: 1px 0;
+}
+
+.plp-log-error {
+	color: #b32d2e;
+}
+
+.plp-steps,
+.plp-limits {
+	margin: 0 0 12px 18px;
+}
+
+.plp-steps li,
+.plp-limits li {
+	margin-bottom: 6px;
+	color: #3c434a;
+	font-size: 13px;
+}
+
+.plp-env {
+	margin: 0 0 0 18px;
+	font-size: 12px;
+	color: #50575e;
+}
+
+.plp-active-banner {
+	margin: 12px 0 0;
+}
+
+.plp-cards-row {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+	gap: 16px;
+	margin: 16px 0;
+}
+
+.plp-metrics {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.plp-metrics li {
+	padding: 4px 0;
+	color: #50575e;
+	font-size: 13px;
+}
+
+.plp-metrics li span {
+	display: inline-block;
+	min-width: 96px;
+	font-weight: 700;
+	color: #1d2327;
+	font-size: 15px;
+}
+
+.plp-table td,
+.plp-table th {
+	vertical-align: middle;
+}
+
+.plp-file {
+	font-size: 11px;
+	color: #787c82;
+	background: transparent;
+}
+
+.plp-delta-bar {
+	display: inline-block;
+	width: 70px;
+	height: 8px;
+	background: #f0f0f1;
+	border-radius: 999px;
+	overflow: hidden;
+	margin-right: 6px;
+	vertical-align: middle;
+}
+
+.plp-delta-bar span {
+	display: block;
+	height: 100%;
+	background: linear-gradient(90deg, #dba617, #d63638);
+}
+
+.plp-badge {
+	display: inline-block;
+	font-size: 11px;
+	font-weight: 600;
+	padding: 2px 8px;
+	border-radius: 999px;
+	white-space: nowrap;
+}
+
+.plp-badge.plp-high {
+	background: #fcf0f1;
+	color: #b32d2e;
+	border: 1px solid #f0c8cb;
+}
+
+.plp-badge.plp-medium {
+	background: #fcf9e8;
+	color: #8a6d00;
+	border: 1px solid #f0e2a5;
+}
+
+.plp-badge.plp-ok {
+	background: #edfaef;
+	color: #1e7b3c;
+	border: 1px solid #bfe3cb;
+}
+
+.plp-badge.plp-failed {
+	background: #f0f0f1;
+	color: #50575e;
+	border: 1px solid #dcdcde;
+}
+
+.plp-reco-list {
+	margin: 0 0 0 18px;
+}
+
+.plp-reco-list li {
+	margin-bottom: 8px;
+	font-size: 13px;
+}
+
+.plp-warn-list {
+	margin: 0 0 0 18px;
+}
+
+.plp-table-compact td,
+.plp-table-compact th {
+	font-size: 12px;
+	padding: 6px 8px;
+}
+
+.plp-actions {
+	margin-top: 12px;
+}
+
+.plp-mu-block textarea {
+	margin-top: 8px;
+}
+
+.plp-author {
+	margin-top: 18px;
+	color: #787c82;
+	font-size: 12px;
+}
