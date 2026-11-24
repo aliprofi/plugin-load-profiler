@@ -9,7 +9,7 @@ class PLP_Installer {
 
 	const MU_FILE   = 'plp-loader.php';
 	const MU_MARKER = 'PLP-MU-LOADER';
-	const MU_VERSION = '1';
+	const MU_VERSION = '3';
 	const DB_VERSION = '1';
 	const CRON_HOOK  = 'plp_cleanup';
 

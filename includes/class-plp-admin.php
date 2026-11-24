@@ -81,6 +81,7 @@ class PLP_Admin {
 					'confirmRestore' => 'Включить обратно плагины из этого скана?',
 					'restored'    => 'Включено плагинов: %d',
 					'http'        => 'HTTP %s',
+					'hint500'     => 'HTTP 500: страница не открывается без отключённых плагинов. Попробуйте режим «Быстрый зонд».',
 					'network'     => 'Сетевая ошибка',
 					'step'        => '%1$s · прогон %2$d/%3$d',
 					'progress'    => '%1$d из %2$d',
@@ -153,6 +154,7 @@ class PLP_Admin {
 		);
 
 		$urls_text = implode( "\n", array_map( 'strval', (array) $settings['urls'] ) );
+		$mode      = isset( $_GET['mode'] ) && 'probe' === $_GET['mode'] ? 'probe' : 'page'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
 		echo '<h1>Профайлер плагинов <span class="plp-tag">P3-style</span></h1>';
 		echo '<p class="plp-lead">Поочерёдный замер вклада каждого плагина во время генерации страницы, память и SQL-запросы. Базовая линия — тот же сайт без плагинов, дельта — вклад конкретного плагина.</p>';
@@ -233,7 +235,14 @@ class PLP_Admin {
 			echo '<input type="number" id="plp-runs" name="runs" min="1" max="' . esc_attr( PLP_Scan_Manager::MAX_RUNS ) . '" value="' . esc_attr( (int) $settings['runs'] ) . '" class="small-text">';
 			echo ' <span class="plp-muted">1–' . esc_html( PLP_Scan_Manager::MAX_RUNS ) . ', берётся медиана</span></p>';
 
-			echo '<p><label for="plp-urls">Страницы для теста <span class="plp-muted">(по одной в строке, до ' . esc_html( PLP_Scan_Manager::MAX_URLS ) . ')</span></label>';
+			echo '<fieldset class="plp-fieldset plp-mode">';
+			echo '<legend>Режим замера</legend>';
+			echo '<label><input type="radio" name="mode" value="page"' . checked( 'page', $mode, false ) . '> Страницы сайта <span class="plp-muted">— реалистично: тема, шаблоны, виджеты</span></label>';
+			echo '<label><input type="radio" name="mode" value="probe"' . checked( 'probe', $mode, false ) . '> Быстрый зонд <span class="plp-muted">— только загрузка плагинов и init, без шаблонов темы</span></label>';
+			echo '<p class="plp-muted">Если прогоны возвращают HTTP 500, страница не собирается без отключённых плагинов (конструктор страниц, шаблон WooCommerce). «Быстрый зонд» измерит чистый вклад плагинов и не упадёт.</p>';
+			echo '</fieldset>';
+
+			echo '<p id="plp-urls-row"><label for="plp-urls">Страницы для теста <span class="plp-muted">(по одной в строке, до ' . esc_html( PLP_Scan_Manager::MAX_URLS ) . ')</span></label>';
 			echo '<textarea id="plp-urls" name="urls" rows="3" class="large-text code">' . esc_textarea( $urls_text ) . '</textarea>';
 			echo '<span class="plp-muted">Только этот сайт. Используйте финальные URL без редиректов.</span></p>';
 
@@ -257,8 +266,7 @@ class PLP_Admin {
 		echo '<h2>Как это работает</h2>';
 		echo '<ol class="plp-steps">';
 		echo '<li>Устанавливается mu-plugin загрузчик — он срабатывает раньше обычных плагинов.</li>';
-		echo '<li>Каждый шаг — обычный GET на выбранную страницу с одноразовым токеном. На время шага активны только профайлер и один проверяемый плагин.</li>';
-		echo '<li>Сервер записывает время генерации, пиковую память, число и суммарное время SQL-запросов.</li>';
+		echo '<li>Каждый шаг — обычный GET на выбранную страницу с одноразовым токеном. На время шага активны только профайлер и один проверяемый плагин.</li>';		echo '<li>Сервер записывает время генерации, пиковую память, число и суммарное время SQL-запросов.</li>';
 		echo '<li>Базовая линия — тот же сайт без плагинов. Дельта показывает личный вклад плагина.</li>';
 		echo '<li>Итог — медиана по прогонам, сортировка по влиянию на время, доля в общей нагрузке.</li>';
 		echo '</ol>';
@@ -368,6 +376,8 @@ class PLP_Admin {
 		$runs     = isset( $summary['baseline_runs'] ) ? $summary['baseline_runs'] : array( 'ok' => 0, 'failed' => 0, 'redirects' => 0, 'expected' => 0 );
 		$targets  = isset( $summary['targets'] ) ? $summary['targets'] : array();
 		$totals   = isset( $summary['totals'] ) ? $summary['totals'] : array( 'steps' => 0, 'saved' => 0, 'missing' => 0 );
+		$mode     = isset( $summary['mode'] ) ? (string) $summary['mode'] : 'page';
+		$rows     = $manager->get_results( $scan_id );
 
 		/* Сводка */
 		echo '<div class="plp-cards-row">';
@@ -388,6 +398,7 @@ class PLP_Admin {
 		echo '<h2>Скан</h2>';
 		echo '<ul class="plp-metrics">';
 		echo '<li><span>' . esc_html( $scan['created_at'] ) . '</span> начат</li>';
+		echo '<li><span>' . esc_html( 'probe' === $mode ? 'Быстрый зонд' : 'Страницы сайта' ) . '</span> режим</li>';
 		echo '<li><span>' . esc_html( (int) $summary['runs'] ) . '</span> прогонов на цель</li>';
 		echo '<li><span>' . esc_html( count( (array) $summary['urls'] ) ) . '</span> страниц</li>';
 		echo '<li><span>' . esc_html( count( $targets ) ) . '</span> плагинов</li>';
@@ -399,7 +410,9 @@ class PLP_Admin {
 
 		/* Предупреждения */
 		$warnings = array();
-		if ( $runs['failed'] > 0 ) {
+		if ( 0 === (int) $runs['ok'] ) {
+			$warnings[] = 'Ни один прогон базовой линии не удался: страница, вероятно, не открывается без отключённых плагинов (конструктор страниц, шаблон WooCommerce и т.п.). Запустите скан в режиме «Быстрый зонд» — он измерит загрузку плагинов без шаблонов темы.';
+		} elseif ( $runs['failed'] > 0 ) {
 			$warnings[] = sprintf( 'Неудачных прогонов базовой линии: %d. Дельта может быть завышена.', $runs['failed'] );
 		}
 		if ( $runs['redirects'] > 0 ) {
@@ -424,6 +437,28 @@ class PLP_Admin {
 			echo '<div class="notice notice-warning"><ul class="plp-warn-list">';
 			foreach ( $warnings as $warning ) {
 				echo '<li>' . esc_html( $warning ) . '</li>';
+			}
+			echo '</ul></div>';
+		}
+
+		$error_notes = array();
+		foreach ( $rows as $row ) {
+			$note = trim( (string) $row['error'] );
+			if ( '' === $note ) {
+				continue;
+			}
+			$error_notes[ $note ] = isset( $error_notes[ $note ] ) ? $error_notes[ $note ] + 1 : 1;
+		}
+		if ( $error_notes ) {
+			arsort( $error_notes );
+			echo '<div class="notice notice-error"><p><strong>Что вернул сервер на неудачных прогонах:</strong></p><ul class="plp-warn-list">';
+			$shown = 0;
+			foreach ( $error_notes as $note => $count ) {
+				echo '<li><code>' . esc_html( $note ) . '</code>' . ( $count > 1 ? ' — ' . esc_html( $count ) . ' раз(а)' : '' ) . '</li>';
+				$shown++;
+				if ( $shown >= 5 ) {
+					break;
+				}
 			}
 			echo '</ul></div>';
 		}
@@ -507,8 +542,7 @@ class PLP_Admin {
 		echo '</div>';
 
 		/* Детали прогонов */
-		$rows  = $manager->get_results( $scan_id );
-		$by    = array();
+		$by = array();
 		foreach ( $rows as $row ) {
 			$by[ (string) $row['plugin_file'] ][] = $row;
 		}
@@ -548,7 +582,9 @@ class PLP_Admin {
 		echo '<a class="button button-link-delete" href="#" id="plp-delete-scan" data-scan-id="' . esc_attr( $scan_id ) . '">Удалить скан</a>';
 		echo '</p>';
 
-		if ( ! empty( $urls ) ) {
+		if ( 'probe' === $mode ) {
+			echo '<p class="plp-muted">Режим «Быстрый зонд»: замерялась только загрузка плагинов и init, без вывода темы и виджетов. Страница: ' . esc_html( home_url( '/' ) ) . '</p>';
+		} elseif ( ! empty( $urls ) ) {
 			echo '<p class="plp-muted">Тестировались страницы: ' . esc_html( implode( ', ', array_map( 'esc_url_raw', $urls ) ) ) . '</p>';
 		}
 	}

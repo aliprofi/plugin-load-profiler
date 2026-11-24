@@ -2,7 +2,7 @@
 /**
  * Plugin Name: P3 Load Profiler — профайлер плагинов
  * Description: Замеряет, сколько времени, памяти и SQL-запросов добавляет каждый активный плагин. Прогоняет страницы по одному плагину за раз и показывает, кто сильнее всего грузит сайт и базу.
- * Version: 0.1.1
+ * Version: 0.2.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: Али Профи
@@ -14,7 +14,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'PLP_VERSION', '0.1.1' );
+define( 'PLP_VERSION', '0.2.0' );
 define( 'PLP_FILE', __FILE__ );
 define( 'PLP_DIR', plugin_dir_path( __FILE__ ) );
 define( 'PLP_URL', plugin_dir_url( __FILE__ ) );

@@ -1,6 +1,6 @@
 <?php
 /**
- * PLP-MU-LOADER v2
+ * PLP-MU-LOADER v3
  * Устанавливается плагином P3 Load Profiler в wp-content/mu-plugins/.
  * Работает только при активном скане и валидном токене, в остальное время полностью пассивен.
  * Не редактируйте вручную: при следующем открытии страницы плагина файл будет обновлён.
@@ -46,6 +46,7 @@ $plp_target = isset( $plp_scan['target_file'] ) ? (string) $plp_scan['target_fil
 $plp_run    = isset( $_GET['plp_run'] ) ? absint( $_GET['plp_run'] ) : 0;
 $plp_url_i  = isset( $_GET['plp_url'] ) ? absint( $_GET['plp_url'] ) : 0;
 $plp_step   = isset( $_GET['plp_step'] ) ? absint( $_GET['plp_step'] ) : 0;
+$plp_probe  = isset( $_GET['plp_probe'] ) && '1' === (string) $_GET['plp_probe'];
 
 $GLOBALS['plp_ctx'] = array(
 	'scan_id' => (int) $plp_scan['id'],
@@ -57,6 +58,28 @@ $GLOBALS['plp_ctx'] = array(
 );
 
 $plp_profiler = (string) $plp_scan['profiler_file'];
+
+/*
+ * Быстрый зонд: измеряем только загрузку плагинов и init, не запуская шаблоны темы.
+ * Так замер работает даже если страницу собирает отключённый конструктор.
+ */
+if ( $plp_probe ) {
+	add_action(
+		'wp_loaded',
+		static function () {
+			if ( ! headers_sent() ) {
+				if ( function_exists( 'nocache_headers' ) ) {
+					nocache_headers();
+				}
+				header( 'X-PLP-Profile: 1' );
+				header( 'Content-Type: text/plain; charset=utf-8' );
+			}
+			echo 'PLP probe OK';
+			exit;
+		},
+		PHP_INT_MAX
+	);
+}
 
 /*
  * WordPress забирает список активных плагинов до загрузки обычных плагинов,
@@ -152,35 +175,51 @@ add_action(
 		$status   = function_exists( 'http_response_code' ) ? (int) http_response_code() : 0;
 		$target   = '' !== $ctx['target'] ? (string) $ctx['target'] : '__baseline__';
 
-		$exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
-		if ( ! $exists ) {
-			return;
+		$error = '';
+		$last  = function_exists( 'error_get_last' ) ? error_get_last() : null;
+		if (
+			is_array( $last ) &&
+			isset( $last['type'], $last['message'] ) &&
+			in_array( $last['type'], array( E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR ), true )
+		) {
+			$where = isset( $last['file'] ) ? basename( (string) $last['file'] ) . ':' . (int) $last['line'] : '';
+			$error = 'PHP: ' . (string) $last['message'] . ( '' !== $where ? ' (' . $where . ')' : '' );
+			$error = function_exists( 'mb_substr' ) ? mb_substr( $error, 0, 200 ) : substr( $error, 0, 200 );
 		}
 
-		$scheme = function_exists( 'is_ssl' ) && is_ssl() ? 'https' : 'http';
-		$host   = isset( $_SERVER['HTTP_HOST'] ) ? (string) $_SERVER['HTTP_HOST'] : '';
-		$uri    = isset( $_SERVER['REQUEST_URI'] ) ? (string) $_SERVER['REQUEST_URI'] : '';
-		$url    = $scheme . '://' . $host . $uri;
+		try {
+			$exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
+			if ( ! $exists ) {
+				return;
+			}
 
-		$wpdb->replace(
-			$table,
-			array(
-				'scan_id'       => (int) $ctx['scan_id'],
-				'plugin_file'   => $target,
-				'plugin_name'   => '',
-				'run_index'     => (int) $ctx['run'],
-				'url_index'     => (int) $ctx['url_i'],
-				'url'           => $url,
-				'load_time_ms'  => round( $duration * 1000, 3 ),
-				'peak_memory_kb'=> (int) round( $memory / 1024 ),
-				'query_count'   => $queries,
-				'query_time_ms' => round( $qtime * 1000, 3 ),
-				'http_status'   => $status,
-				'error'         => '',
-				'created_at'    => current_time( 'mysql' ),
-			),
-			array( '%d', '%s', '%s', '%d', '%d', '%s', '%f', '%d', '%d', '%f', '%d', '%s', '%s' )
-		);
+			$scheme = function_exists( 'is_ssl' ) && is_ssl() ? 'https' : 'http';
+			$host   = isset( $_SERVER['HTTP_HOST'] ) ? (string) $_SERVER['HTTP_HOST'] : '';
+			$uri    = isset( $_SERVER['REQUEST_URI'] ) ? (string) $_SERVER['REQUEST_URI'] : '';
+			$url    = $scheme . '://' . $host . $uri;
+
+			$wpdb->replace(
+				$table,
+				array(
+					'scan_id'       => (int) $ctx['scan_id'],
+					'plugin_file'   => $target,
+					'plugin_name'   => '',
+					'run_index'     => (int) $ctx['run'],
+					'url_index'     => (int) $ctx['url_i'],
+					'url'           => $url,
+					'load_time_ms'  => round( $duration * 1000, 3 ),
+					'peak_memory_kb'=> (int) round( $memory / 1024 ),
+					'query_count'   => $queries,
+					'query_time_ms' => round( $qtime * 1000, 3 ),
+					'http_status'   => $status,
+					'error'         => $error,
+					'created_at'    => current_time( 'mysql' ),
+				),
+				array( '%d', '%s', '%s', '%d', '%d', '%s', '%f', '%d', '%d', '%f', '%d', '%s', '%s' )
+			);
+		} catch ( \Throwable $e ) {
+			// Запись замера не должна превращать ответ сайта в ошибку.
+		}
 	},
 	PHP_INT_MAX
 );

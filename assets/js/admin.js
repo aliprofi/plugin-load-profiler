@@ -8,7 +8,8 @@
 		scanId: 0,
 		total: 0,
 		running: false,
-		aborted: false
+		aborted: false,
+		hinted500: false
 	};
 
 	function $(selector, root) {
@@ -192,7 +193,12 @@
 					var resultText = status
 						? (i18n.http || 'HTTP %s').replace('%s', status)
 						: (error || i18n.network || 'Сетевая ошибка');
-					logLine('#' + (step.index + 1) + ' · ' + step.target + ' · ' + resultText, !ok && status !== 200);
+					logLine('#' + (step.index + 1) + ' · ' + step.target + ' · ' + resultText, !ok);
+
+					if (status >= 500 && !state.hinted500) {
+						state.hinted500 = true;
+						logLine(i18n.hint500 || 'HTTP 500 — страница не открывается без отключённых плагинов. Попробуйте режим «Быстрый зонд».', true);
+					}
 
 					return ajax('plp_step_done', {
 						scan_id: scanId,
@@ -224,6 +230,24 @@
 
 		var startButton = $('#plp-start');
 		if (startButton) {
+			var urlsRow = $('#plp-urls-row');
+
+			function isProbeMode() {
+				var checkedMode = $('input[name="mode"]:checked', form);
+				return !!checkedMode && checkedMode.value === 'probe';
+			}
+
+			function syncMode() {
+				if (urlsRow) {
+					urlsRow.hidden = isProbeMode();
+				}
+			}
+
+			$all('input[name="mode"]', form).forEach(function (radio) {
+				radio.addEventListener('change', syncMode);
+			});
+			syncMode();
+
 			startButton.addEventListener('click', function () {
 				if (state.running) {
 					return;
@@ -248,6 +272,7 @@
 				ajax('plp_start_scan', {
 					runs: runsInput ? runsInput.value : 3,
 					urls: urlsInput ? urlsInput.value : '',
+					mode: isProbeMode() ? 'probe' : 'page',
 					plugins: checked
 				}).then(function (data) {
 					state.total = data.total;

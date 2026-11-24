@@ -306,3 +306,8 @@
 	color: #787c82;
 	font-size: 12px;
 }
+
+.plp-mode label {
+	display: block;
+	margin: 6px 0;
+}

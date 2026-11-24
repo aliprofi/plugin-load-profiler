@@ -64,8 +64,14 @@ class PLP_Scan_Manager {
 		$runs = isset( $_POST['runs'] ) ? absint( $_POST['runs'] ) : 3;
 		$runs = max( 1, min( self::MAX_RUNS, $runs ) );
 
-		$raw_urls = isset( $_POST['urls'] ) ? wp_unslash( $_POST['urls'] ) : '';
-		$urls     = $this->sanitize_urls( is_string( $raw_urls ) ? $raw_urls : '' );
+		$mode = isset( $_POST['mode'] ) && 'probe' === $_POST['mode'] ? 'probe' : 'page';
+
+		if ( 'probe' === $mode ) {
+			$urls = array( home_url( '/' ) );
+		} else {
+			$raw_urls = isset( $_POST['urls'] ) ? wp_unslash( $_POST['urls'] ) : '';
+			$urls     = $this->sanitize_urls( is_string( $raw_urls ) ? $raw_urls : '' );
+		}
 
 		$raw_plugins = isset( $_POST['plugins'] ) ? (array) wp_unslash( $_POST['plugins'] ) : array();
 		$plugins     = $this->sanitize_plugins( $raw_plugins );
@@ -131,6 +137,7 @@ class PLP_Scan_Manager {
 
 		$config = array(
 			'runs'           => $runs,
+			'mode'           => $mode,
 			'urls'           => array_values( $urls ),
 			'targets'        => $targets,
 			'names'          => $names,
@@ -223,16 +230,17 @@ class PLP_Scan_Manager {
 		update_option( 'plp_active_scan', $active, false );
 
 		$url = isset( $config['urls'][ (int) $step['url'] ] ) ? $config['urls'][ (int) $step['url'] ] : home_url( '/' );
-		$url = add_query_arg(
-			array(
-				'plp_profile' => rawurlencode( $active['token'] ),
-				'plp_run'     => (int) $step['run'],
-				'plp_url'     => (int) $step['url'],
-				'plp_step'    => $index,
-				'plp_ts'      => time(),
-			),
-			$url
+		$args = array(
+			'plp_profile' => rawurlencode( $active['token'] ),
+			'plp_run'     => (int) $step['run'],
+			'plp_url'     => (int) $step['url'],
+			'plp_step'    => $index,
+			'plp_ts'      => time(),
 		);
+		if ( isset( $config['mode'] ) && 'probe' === $config['mode'] ) {
+			$args['plp_probe'] = 1;
+		}
+		$url = add_query_arg( $args, $url );
 
 		$target_file = (string) $step['target'];
 		$target_name = PLP_BASELINE === $target_file
@@ -282,19 +290,28 @@ class PLP_Scan_Manager {
 		global $wpdb;
 		$table = PLP_Installer::table( 'results' );
 
-		$existing = $wpdb->get_var(
+		$existing = $wpdb->get_row(
 			$wpdb->prepare(
-				"SELECT id FROM {$table} WHERE scan_id = %d AND plugin_file = %s AND run_index = %d AND url_index = %d",
+				"SELECT id, error FROM {$table} WHERE scan_id = %d AND plugin_file = %s AND run_index = %d AND url_index = %d",
 				$scan_id,
 				(string) $step['target'],
 				(int) $step['run'],
 				(int) $step['url']
-			)
+			),
+			ARRAY_A
 		);
 
 		$url = isset( $config['urls'][ (int) $step['url'] ] ) ? $config['urls'][ (int) $step['url'] ] : home_url( '/' );
 
 		if ( ! $existing ) {
+			if ( '' !== $error ) {
+				$note = $error;
+			} elseif ( $status >= 500 ) {
+				$note = 'HTTP ' . $status . ': страница завершилась с ошибкой на сервере.';
+			} else {
+				$note = 'Измерение не получено: проверьте mu-plugin и лог ошибок PHP.';
+			}
+
 			$wpdb->insert(
 				$table,
 				array(
@@ -309,19 +326,25 @@ class PLP_Scan_Manager {
 					'query_count'    => 0,
 					'query_time_ms'  => 0,
 					'http_status'    => $status,
-					'error'          => '' !== $error ? $error : 'Измерение не получено: проверьте mu-plugin и лог ошибок PHP.',
+					'error'          => $note,
 					'created_at'     => current_time( 'mysql' ),
 				),
 				array( '%d', '%s', '%s', '%d', '%d', '%s', '%f', '%d', '%d', '%f', '%d', '%s', '%s' )
 			);
 		} elseif ( ! $ok || '' !== $error ) {
+			/* Сохранённый текст фатальной ошибки из shutdown важнее «HTTP 500» от браузера. */
+			$captured = isset( $existing['error'] ) ? trim( (string) $existing['error'] ) : '';
+			if ( '' === $captured ) {
+				$captured = '' !== $error ? $error : 'HTTP ' . $status . ': страница завершилась с ошибкой на сервере.';
+			}
+
 			$wpdb->update(
 				$table,
 				array(
-					'error'       => '' !== $error ? $error : 'Запрос профилирования не выполнен.',
+					'error'       => $captured,
 					'http_status' => $status,
 				),
-				array( 'id' => (int) $existing ),
+				array( 'id' => (int) $existing['id'] ),
 				array( '%s', '%d' ),
 				array( '%d' )
 			);
@@ -675,6 +698,7 @@ class PLP_Scan_Manager {
 		return array(
 			'generated_at' => current_time( 'mysql' ),
 			'runs'         => (int) $config['runs'],
+			'mode'         => isset( $config['mode'] ) ? (string) $config['mode'] : 'page',
 			'urls'         => $config['urls'],
 			'baseline'     => $base,
 			'baseline_runs'=> array(
