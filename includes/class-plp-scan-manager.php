@@ -537,6 +537,41 @@ class PLP_Scan_Manager {
 		);
 	}
 
+	/**
+	 * Декодированный лог нагрузки для плагина (пишется только для первого прогона).
+	 */
+	public function get_details( $scan_id, $plugin_file ) {
+		global $wpdb;
+		$table = PLP_Installer::table( 'results' );
+		$json  = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT details FROM {$table} WHERE scan_id = %d AND plugin_file = %s AND details <> '' ORDER BY id ASC LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$scan_id,
+				(string) $plugin_file
+			)
+		);
+
+		if ( ! is_string( $json ) || '' === $json ) {
+			return null;
+		}
+
+		$data = json_decode( $json, true );
+		return is_array( $data ) ? $data : null;
+	}
+
+	public function details_map( $scan_id ) {
+		global $wpdb;
+		$table = PLP_Installer::table( 'results' );
+		$files = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT DISTINCT plugin_file FROM {$table} WHERE scan_id = %d AND details <> ''", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$scan_id
+			)
+		);
+
+		return array_map( 'strval', (array) $files );
+	}
+
 	private function decode_config( $row ) {
 		$config = json_decode( (string) $row['config'], true );
 		if ( ! is_array( $config ) || ! isset( $config['steps'], $config['urls'], $config['runs'] ) ) {
@@ -559,6 +594,10 @@ class PLP_Scan_Manager {
 
 	public function results_url( $scan_id ) {
 		return admin_url( 'admin.php?page=plp-profiler&scan=' . (int) $scan_id );
+	}
+
+	public function log_url( $scan_id, $plugin_file ) {
+		return add_query_arg( 'log', (string) $plugin_file, $this->results_url( $scan_id ) );
 	}
 
 	/* ------------------------------------------------------- Агрегация */

@@ -21,6 +21,7 @@ class PLP_Admin {
 		add_action( 'admin_enqueue_scripts', array( $this, 'assets' ) );
 		add_action( 'load-toplevel_page_plp-profiler', array( $this, 'maybe_sync' ) );
 		add_action( 'admin_post_plp_export', array( $this, 'export_csv' ) );
+		add_action( 'admin_post_plp_log', array( $this, 'export_log' ) );
 	}
 
 	public function menu() {
@@ -99,9 +100,12 @@ class PLP_Admin {
 		}
 
 		$scan_id = isset( $_GET['scan'] ) ? absint( $_GET['scan'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$log     = isset( $_GET['log'] ) ? sanitize_text_field( wp_unslash( $_GET['log'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		echo '<div class="wrap plp-wrap">';
 
-		if ( $scan_id ) {
+		if ( $scan_id && '' !== $log ) {
+			$this->render_log( $scan_id, $log );
+		} elseif ( $scan_id ) {
 			$this->render_results( $scan_id );
 		} else {
 			$this->render_dashboard();
@@ -379,6 +383,7 @@ class PLP_Admin {
 		$totals   = isset( $summary['totals'] ) ? $summary['totals'] : array( 'steps' => 0, 'saved' => 0, 'missing' => 0 );
 		$mode     = isset( $summary['mode'] ) ? (string) $summary['mode'] : 'page';
 		$rows     = $manager->get_results( $scan_id );
+		$logged   = $manager->details_map( $scan_id );
 
 		/* Сводка */
 		echo '<div class="plp-cards-row">';
@@ -521,6 +526,9 @@ class PLP_Admin {
 
 			echo '<tr>';
 			echo '<td><strong>' . esc_html( $target['name'] ) . '</strong><br><code class="plp-file">' . esc_html( $target['file'] ) . '</code>';
+			if ( in_array( (string) $target['file'], $logged, true ) ) {
+				echo '<br><a href="' . esc_url( $manager->log_url( $scan_id, (string) $target['file'] ) ) . '">Лог нагрузки →</a>';
+			}
 			if ( (int) $target['runs_failed'] > 0 ) {
 				echo '<br><span class="plp-bad">неудачных прогонов: ' . esc_html( (int) $target['runs_failed'] ) . '</span>';
 			}
@@ -590,6 +598,237 @@ class PLP_Admin {
 		}
 	}
 
+	/* ------------------------------------------------------------- Лог нагрузки */
+
+	private function render_log( $scan_id, $plugin_file ) {
+		$manager = PLP_Scan_Manager::instance();
+		$scan    = $manager->get_scan( $scan_id );
+
+		if ( ! $scan ) {
+			echo '<h1>Скан не найден</h1>';
+			echo '<p><a href="' . esc_url( admin_url( 'admin.php?page=plp-profiler' ) ) . '">← К списку сканов</a></p>';
+			return;
+		}
+
+		echo '<h1>Лог нагрузки</h1>';
+		echo '<p><a href="' . esc_url( $manager->results_url( $scan_id ) ) . '">← К отчёту скана #' . esc_html( $scan_id ) . '</a></p>';
+
+		$config = json_decode( (string) $scan['config'], true );
+		$names  = is_array( $config ) && isset( $config['names'] ) ? (array) $config['names'] : array();
+
+		if ( ! isset( $names[ $plugin_file ] ) ) {
+			echo '<div class="notice notice-error"><p>Плагин <code>' . esc_html( $plugin_file ) . '</code> не входит в скан #' . esc_html( $scan_id ) . '.</p></div>';
+			return;
+		}
+
+		$name    = (string) $names[ $plugin_file ];
+		$details = $manager->get_details( $scan_id, $plugin_file );
+
+		echo '<h2>' . esc_html( $name ) . '</h2>';
+		echo '<p class="plp-muted"><code>' . esc_html( $plugin_file ) . '</code> · скан #' . esc_html( $scan_id ) . ' от ' . esc_html( (string) $scan['created_at'] ) . '</p>';
+
+		$summary = json_decode( (string) $scan['summary'], true );
+		$target  = null;
+		if ( is_array( $summary ) && ! empty( $summary['targets'] ) ) {
+			foreach ( $summary['targets'] as $item ) {
+				if ( (string) $item['file'] === $plugin_file ) {
+					$target = $item;
+					break;
+				}
+			}
+		}
+
+		if ( $target ) {
+			echo '<div class="plp-card"><h2>Итог замера</h2><ul class="plp-metrics plp-metrics-inline">';
+			echo '<li><span>' . esc_html( $this->fmt_ms( $target['values']['time'] ) ) . '</span> время страницы</li>';
+			echo '<li><span>' . esc_html( $this->fmt_delta( $target['delta']['time'], ' мс' ) ) . '</span> к базовой линии</li>';
+			echo '<li><span>' . esc_html( $this->fmt_mb( $target['values']['memory'] ) ) . '</span> пиковая память</li>';
+			echo '<li><span>' . esc_html( number_format_i18n( $target['values']['queries'] ) ) . '</span> SQL-запросов</li>';
+			echo '<li><span>' . esc_html( $this->fmt_delta( $target['delta']['queries'], '' ) ) . '</span> к базовой линии</li>';
+			echo '<li><span>' . esc_html( number_format_i18n( $target['share'], 1 ) ) . '%</span> доля в нагрузке</li>';
+			echo '</ul></div>';
+		}
+
+		if ( ! is_array( $details ) ) {
+			echo '<div class="notice notice-warning"><p><strong>Для этого плагина лог не записан.</strong></p>';
+			echo '<p>Лог снимается только в первом прогоне плагина и только в сканах версии 0.3.0 и новее. Если скан старый или у плагина не было ни одного успешного прогона, запустите новый скан.</p></div>';
+			return;
+		}
+
+		$queries = isset( $details['queries'] ) && is_array( $details['queries'] ) ? $details['queries'] : array();
+		$origins = isset( $queries['origins'] ) && is_array( $queries['origins'] ) ? $queries['origins'] : array();
+		$slow    = isset( $queries['slow'] ) && is_array( $queries['slow'] ) ? $queries['slow'] : array();
+		$files   = isset( $details['files'] ) && is_array( $details['files'] ) ? $details['files'] : array();
+		$hooks   = isset( $details['hooks'] ) && is_array( $details['hooks'] ) ? $details['hooks'] : array();
+
+		$txt_url  = wp_nonce_url(
+			admin_url( 'admin-post.php?action=plp_log&format=txt&scan=' . $scan_id . '&plugin=' . rawurlencode( $plugin_file ) ),
+			'plp_log_' . $scan_id
+		);
+		$json_url = wp_nonce_url(
+			admin_url( 'admin-post.php?action=plp_log&format=json&scan=' . $scan_id . '&plugin=' . rawurlencode( $plugin_file ) ),
+			'plp_log_' . $scan_id
+		);
+
+		echo '<p class="plp-actions">';
+		echo '<a class="button button-primary" href="' . esc_url( $txt_url ) . '">Скачать для разработчика (TXT)</a> ';
+		echo '<a class="button" href="' . esc_url( $json_url ) . '">JSON</a>';
+		echo '</p>';
+		echo '<p class="plp-muted">Передайте отчёт разработчику плагина: в нём видно, из каких файлов и строк плагин делает SQL-запросы, какие из них самые медленные, какие файлы подключает и какие хуки вешает.</p>';
+
+		if ( ! empty( $origins ) ) {
+			echo '<div class="plp-card"><h2>SQL по местам вызова</h2>';
+			echo '<p class="plp-muted">Запросов всего: ' . esc_html( number_format_i18n( isset( $queries['total'] ) ? (int) $queries['total'] : 0 ) ) . ', время сопоставлено: ' . esc_html( number_format_i18n( isset( $queries['timed'] ) ? (int) $queries['timed'] : 0 ) ) . '.</p>';
+			echo '<table class="widefat striped plp-table"><thead><tr><th>Откуда</th><th>Запросов</th><th>Время</th><th>Пример запроса</th></tr></thead><tbody>';
+			foreach ( $origins as $row ) {
+				echo '<tr>';
+				echo '<td><code>' . esc_html( (string) $row['origin'] ) . '</code></td>';
+				echo '<td>' . esc_html( number_format_i18n( (int) $row['count'] ) ) . '</td>';
+				echo '<td>' . esc_html( $this->fmt_ms( (float) $row['ms'] ) ) . '</td>';
+				echo '<td><code class="plp-sql">' . esc_html( (string) $row['sample'] ) . '</code></td>';
+				echo '</tr>';
+			}
+			echo '</tbody></table></div>';
+		}
+
+		if ( ! empty( $slow ) ) {
+			echo '<div class="plp-card"><h2>Самые медленные запросы</h2>';
+			echo '<table class="widefat striped plp-table"><thead><tr><th>Время</th><th>Откуда</th><th>Запрос</th></tr></thead><tbody>';
+			foreach ( $slow as $row ) {
+				echo '<tr>';
+				echo '<td>' . esc_html( number_format_i18n( (float) $row['ms'], 2 ) . ' мс' ) . '</td>';
+				echo '<td><code>' . esc_html( (string) $row['origin'] ) . '</code></td>';
+				echo '<td><code class="plp-sql">' . esc_html( (string) $row['sql'] ) . '</code></td>';
+				echo '</tr>';
+			}
+			echo '</tbody></table></div>';
+		}
+
+		if ( ! empty( $files ) ) {
+			$largest = isset( $files['largest'] ) && is_array( $files['largest'] ) ? $files['largest'] : array();
+			echo '<div class="plp-card"><h2>Файлы плагина</h2>';
+			echo '<p class="plp-muted">Подключено файлов: ' . esc_html( number_format_i18n( isset( $files['count'] ) ? (int) $files['count'] : 0 ) ) . ', суммарный объём: ' . esc_html( $this->fmt_bytes( isset( $files['bytes'] ) ? (int) $files['bytes'] : 0 ) ) . '.</p>';
+			if ( ! empty( $largest ) ) {
+				echo '<table class="widefat striped plp-table"><thead><tr><th>Файл</th><th>Размер</th></tr></thead><tbody>';
+				foreach ( $largest as $row ) {
+					echo '<tr><td><code>' . esc_html( (string) $row['file'] ) . '</code></td>';
+					echo '<td>' . esc_html( $this->fmt_bytes( (int) $row['bytes'] ) ) . '</td></tr>';
+				}
+				echo '</tbody></table>';
+			}
+			echo '</div>';
+		}
+
+		if ( ! empty( $hooks ) ) {
+			$top = isset( $hooks['top'] ) && is_array( $hooks['top'] ) ? $hooks['top'] : array();
+			echo '<div class="plp-card"><h2>Хуки</h2>';
+			echo '<p class="plp-muted">Колбэков зарегистрировано: ' . esc_html( number_format_i18n( isset( $hooks['total'] ) ? (int) $hooks['total'] : 0 ) ) . '.</p>';
+			if ( ! empty( $top ) ) {
+				echo '<table class="widefat striped plp-table"><thead><tr><th>Хук</th><th>Колбэков</th></tr></thead><tbody>';
+				foreach ( $top as $row ) {
+					echo '<tr><td><code>' . esc_html( (string) $row['hook'] ) . '</code></td>';
+					echo '<td>' . esc_html( number_format_i18n( (int) $row['count'] ) ) . '</td></tr>';
+				}
+				echo '</tbody></table>';
+			}
+			echo '</div>';
+		}
+
+		echo '<div class="plp-card">';
+		echo '<h2>Текст отчёта</h2>';
+		echo '<details><summary>Показать текст для разработчика</summary>';
+		echo '<pre class="plp-log-preview">' . esc_html( $this->log_text( $scan, $plugin_file, $name, $target, $details ) ) . '</pre>';
+		echo '</details>';
+		echo '</div>';
+	}
+
+	private function log_text( $scan, $plugin_file, $name, $target, $details ) {
+		$lines   = array();
+		$lines[] = 'P3 Load Profiler — лог нагрузки плагина';
+		$lines[] = '======================================';
+		$lines[] = 'Сайт: ' . home_url( '/' );
+		$lines[] = 'Скан: #' . (int) $scan['id'] . ' от ' . (string) $scan['created_at'];
+		$lines[] = 'Плагин: ' . $name;
+		$lines[] = 'Файл: ' . $plugin_file;
+
+		if ( is_array( $target ) ) {
+			$lines[] = 'Время страницы с плагином: ' . $this->fmt_ms( $target['values']['time'] ) . ' (Δ ' . $this->fmt_delta( $target['delta']['time'], ' мс' ) . ')';
+			$lines[] = 'Пиковая память: ' . $this->fmt_mb( $target['values']['memory'] );
+			$lines[] = 'SQL: ' . number_format_i18n( $target['values']['queries'] ) . ' запросов (Δ ' . $this->fmt_delta( $target['delta']['queries'], '' ) . '), ' . $this->fmt_ms( $target['values']['qtime'] );
+			$lines[] = 'Доля в нагрузке: ' . number_format_i18n( $target['share'], 1 ) . '%';
+		}
+
+		$lines[] = 'Снято: ' . current_time( 'mysql' );
+		$lines[] = '';
+		$lines[] = 'Данные получены при изолированном прогоне: активны ядро, тема и только этот плагин.';
+		$lines[] = 'Время SQL берётся из SAVEQUERIES; источник указан как файл:строка относительно wp-content.';
+		$lines[] = '';
+
+		$queries = isset( $details['queries'] ) && is_array( $details['queries'] ) ? $details['queries'] : array();
+		$origins = isset( $queries['origins'] ) && is_array( $queries['origins'] ) ? $queries['origins'] : array();
+		$slow    = isset( $queries['slow'] ) && is_array( $queries['slow'] ) ? $queries['slow'] : array();
+
+		$lines[] = '[SQL-запросы]';
+		$lines[] = 'Всего: ' . (int) ( isset( $queries['total'] ) ? $queries['total'] : 0 ) . ', с замером времени: ' . (int) ( isset( $queries['timed'] ) ? $queries['timed'] : 0 );
+
+		if ( ! empty( $origins ) ) {
+			$lines[] = '';
+			$lines[] = 'По местам вызова:';
+			$i = 1;
+			foreach ( $origins as $row ) {
+				$lines[] = sprintf(
+					'%2d. %s — %d запросов, %s мс',
+					$i++,
+					(string) $row['origin'],
+					(int) $row['count'],
+					number_format_i18n( (float) $row['ms'], 2 )
+				);
+				if ( ! empty( $row['sample'] ) ) {
+					$lines[] = '    Пример: ' . (string) $row['sample'];
+				}
+			}
+		}
+
+		if ( ! empty( $slow ) ) {
+			$lines[] = '';
+			$lines[] = 'Самые медленные запросы:';
+			$i = 1;
+			foreach ( $slow as $row ) {
+				$lines[] = sprintf( '%2d. %s мс — %s', $i++, number_format_i18n( (float) $row['ms'], 2 ), (string) $row['origin'] );
+				$lines[] = '    ' . (string) $row['sql'];
+			}
+		}
+
+		$lines[] = '';
+
+		$files = isset( $details['files'] ) && is_array( $details['files'] ) ? $details['files'] : array();
+		$lines[] = '[Файлы плагина]';
+		$lines[] = 'Подключено файлов: ' . (int) ( isset( $files['count'] ) ? $files['count'] : 0 ) . ', объём: ' . $this->fmt_bytes( isset( $files['bytes'] ) ? (int) $files['bytes'] : 0 );
+		if ( ! empty( $files['largest'] ) && is_array( $files['largest'] ) ) {
+			$lines[] = '';
+			$lines[] = 'Самые крупные:';
+			foreach ( $files['largest'] as $row ) {
+				$lines[] = '  ' . (string) $row['file'] . ' — ' . $this->fmt_bytes( (int) $row['bytes'] );
+			}
+		}
+
+		$lines[] = '';
+
+		$hooks = isset( $details['hooks'] ) && is_array( $details['hooks'] ) ? $details['hooks'] : array();
+		$lines[] = '[Хуки]';
+		$lines[] = 'Колбэков зарегистрировано: ' . (int) ( isset( $hooks['total'] ) ? $hooks['total'] : 0 );
+		if ( ! empty( $hooks['top'] ) && is_array( $hooks['top'] ) ) {
+			$lines[] = '';
+			foreach ( $hooks['top'] as $row ) {
+				$lines[] = '  ' . (string) $row['hook'] . ' — ' . (int) $row['count'];
+			}
+		}
+
+		$lines[] = '';
+
+		return implode( "\n", $lines );
+	}
+
 	/* ------------------------------------------------------------- Экспорт */
 
 	public function export_csv() {
@@ -654,6 +893,89 @@ class PLP_Admin {
 		return $value;
 	}
 
+	public function export_log() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( 'Недостаточно прав.' );
+		}
+
+		$scan_id = isset( $_GET['scan'] ) ? absint( $_GET['scan'] ) : 0;
+		check_admin_referer( 'plp_log_' . $scan_id );
+
+		$plugin_file = isset( $_GET['plugin'] ) ? sanitize_text_field( wp_unslash( $_GET['plugin'] ) ) : '';
+		$format      = isset( $_GET['format'] ) && 'json' === $_GET['format'] ? 'json' : 'txt';
+
+		$manager = PLP_Scan_Manager::instance();
+		$scan    = $manager->get_scan( $scan_id );
+		if ( ! $scan ) {
+			wp_die( 'Скан не найден.' );
+		}
+
+		$config = json_decode( (string) $scan['config'], true );
+		$names  = is_array( $config ) && isset( $config['names'] ) ? (array) $config['names'] : array();
+		if ( ! isset( $names[ $plugin_file ] ) ) {
+			wp_die( 'Плагин не входит в этот скан.' );
+		}
+
+		$details = $manager->get_details( $scan_id, $plugin_file );
+		if ( ! is_array( $details ) ) {
+			wp_die( 'Для этого плагина лог не записан. Запустите новый скан.' );
+		}
+
+		$summary = json_decode( (string) $scan['summary'], true );
+		$target  = null;
+		if ( is_array( $summary ) && ! empty( $summary['targets'] ) ) {
+			foreach ( $summary['targets'] as $item ) {
+				if ( (string) $item['file'] === $plugin_file ) {
+					$target = $item;
+					break;
+				}
+			}
+		}
+
+		$name = (string) $names[ $plugin_file ];
+		$slug = '.' === dirname( $plugin_file ) ? basename( $plugin_file, '.php' ) : dirname( $plugin_file );
+		$slug = sanitize_file_name( str_replace( '/', '-', $slug ) );
+
+		nocache_headers();
+
+		if ( 'json' === $format ) {
+			$meta = array(
+				'site'        => home_url( '/' ),
+				'scan_id'     => (int) $scan_id,
+				'created_at'  => (string) $scan['created_at'],
+				'plugin'      => $plugin_file,
+				'plugin_name' => $name,
+			);
+			if ( is_array( $target ) ) {
+				$meta['metrics'] = array(
+					'time_ms'         => $target['values']['time'],
+					'delta_time_ms'   => $target['delta']['time'],
+					'memory_kb'       => $target['values']['memory'],
+					'queries'         => $target['values']['queries'],
+					'delta_queries'   => $target['delta']['queries'],
+					'query_time_ms'   => $target['values']['qtime'],
+					'share_percent'   => $target['share'],
+				);
+			}
+
+			header( 'Content-Type: application/json; charset=utf-8' );
+			header( 'Content-Disposition: attachment; filename=plp-log-' . (int) $scan_id . '-' . $slug . '.json' );
+			echo wp_json_encode(
+				array(
+					'meta'    => $meta,
+					'details' => $details,
+				),
+				JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+			);
+			exit;
+		}
+
+		header( 'Content-Type: text/plain; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename=plp-log-' . (int) $scan_id . '-' . $slug . '.txt' );
+		echo $this->log_text( $scan, $plugin_file, $name, $target, $details ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+		exit;
+	}
+
 	/* ------------------------------------------------------------- Формат */
 
 	private function fmt_ms( $value ) {
@@ -669,6 +991,17 @@ class PLP_Admin {
 		$sign     = $value >= 0 ? '+' : '';
 		$decimals = ' мс' === $unit ? 1 : 0;
 		return $sign . number_format_i18n( $value, $decimals ) . $unit;
+	}
+
+	private function fmt_bytes( $bytes ) {
+		$bytes = (float) $bytes;
+		if ( $bytes >= 1048576 ) {
+			return number_format_i18n( $bytes / 1048576, 1 ) . ' МБ';
+		}
+		if ( $bytes >= 1024 ) {
+			return number_format_i18n( $bytes / 1024, 0 ) . ' КБ';
+		}
+		return number_format_i18n( $bytes, 0 ) . ' Б';
 	}
 
 	private function severity_label( $severity ) {

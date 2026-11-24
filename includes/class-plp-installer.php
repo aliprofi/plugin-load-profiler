@@ -9,8 +9,8 @@ class PLP_Installer {
 
 	const MU_FILE   = 'plp-loader.php';
 	const MU_MARKER = 'PLP-MU-LOADER';
-	const MU_VERSION = '3';
-	const DB_VERSION = '1';
+	const MU_VERSION = '4';
+	const DB_VERSION = '2';
 	const CRON_HOOK  = 'plp_cleanup';
 
 	public static function activate() {
@@ -22,6 +22,17 @@ class PLP_Installer {
 		if ( ! wp_next_scheduled( self::CRON_HOOK ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', self::CRON_HOOK );
 		}
+	}
+
+	/**
+	 * Обновляет схему после апдейта плагина (новая колонка details и т.п.).
+	 */
+	public static function maybe_upgrade() {
+		if ( get_option( 'plp_db_version' ) === self::DB_VERSION ) {
+			return;
+		}
+		self::create_tables();
+		update_option( 'plp_db_version', self::DB_VERSION );
 	}
 
 	public static function deactivate() {
@@ -247,6 +258,7 @@ class PLP_Installer {
 			query_time_ms decimal(12,3) NOT NULL DEFAULT 0,
 			http_status smallint(5) unsigned NOT NULL DEFAULT 0,
 			error varchar(255) NOT NULL DEFAULT '',
+			details longtext NULL,
 			created_at datetime NOT NULL,
 			PRIMARY KEY  (id),
 			UNIQUE KEY scan_step (scan_id,plugin_file,run_index,url_index),

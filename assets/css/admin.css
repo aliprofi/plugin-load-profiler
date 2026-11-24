@@ -311,3 +311,30 @@
 	display: block;
 	margin: 6px 0;
 }
+
+.plp-metrics-inline {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px 28px;
+}
+
+.plp-sql {
+	display: inline-block;
+	max-width: 560px;
+	overflow-wrap: anywhere;
+	font-size: 11px;
+	background: transparent;
+}
+
+.plp-log-preview {
+	max-height: 460px;
+	overflow: auto;
+	padding: 12px 14px;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font-size: 12px;
+	line-height: 1.55;
+}

@@ -24,6 +24,7 @@ class PLP_Plugin {
 		PLP_Scan_Manager::instance()->register_hooks();
 
 		if ( is_admin() ) {
+			PLP_Installer::maybe_upgrade();
 			PLP_Admin::instance()->register_hooks();
 		}
 	}
